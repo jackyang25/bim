@@ -1,0 +1,31 @@
+{
+  "name": "boundary-integrity-monitor",
+  "version": "0.1.0",
+  "description": "MCP server for real-time boundary integrity monitoring of clinical AI agents",
+  "type": "module",
+  "main": "dist/index.js",
+  "bin": {
+    "boundary-integrity-monitor": "./dist/index.js"
+  },
+  "license": "MIT",
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "dev": "tsc --watch",
+    "demo": "tsc && node dist/demo.js",
+    "eval": "tsc && node dist/run-eval.js",
+    "test": "tsc && node --test dist/__tests__/*.test.js"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.39.0",
+    "@modelcontextprotocol/sdk": "^1.0.0",
+    "zod": "^3.23.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.5.0"
+  }
+}

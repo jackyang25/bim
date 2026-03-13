@@ -1,0 +1,10 @@
+{
+  "name": "mcp-rme",
+  "version": "0.1.0",
+  "description": "Real-time Monitoring and Evaluation — MCP server workspace for clinical AI governance",
+  "license": "MIT",
+  "private": true,
+  "workspaces": [
+    "boundary-integrity-monitor"
+  ]
+}
