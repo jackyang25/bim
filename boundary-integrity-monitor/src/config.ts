@@ -43,10 +43,19 @@ export const config = {
     maxRequestsPerMinute:    int("MAX_REQUESTS_PER_MINUTE",    60),
   },
 
-  // Bayesian routing thresholds — placeholder values.
-  // These will be calibrated empirically from verdict data once the
-  // Bayesian classifier is live. Exposed here so they can be tuned
-  // per deployment without code changes.
+  // Prior source for the Bayesian classifier.
+  // PRIOR_SOURCE: "uniform" | "config" | "pooled"
+  //   uniform — Beta(1,1) per category, zero knowledge (default)
+  //   config  — loads per-category priors from PRIOR_CONFIG_PATH JSON file
+  //   pooled  — computes priors from shared verdict pool
+  // PRIOR_CONFIG_PATH: path to JSON file (only used when PRIOR_SOURCE=config)
+  prior: {
+    source: str("PRIOR_SOURCE", "uniform") as "uniform" | "config" | "pooled",
+    configPath: process.env.PRIOR_CONFIG_PATH,
+  },
+
+  // Bayesian routing thresholds — calibrated empirically from verdict data.
+  // Exposed here so they can be tuned per deployment without code changes.
   routing: {
     tEscalateSafety: float("T_ESCALATE_SAFETY", 0.70), // Escalation category
     tEscalate:       float("T_ESCALATE",        0.85), // Other categories

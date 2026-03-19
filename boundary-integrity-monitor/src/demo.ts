@@ -245,7 +245,6 @@ async function main() {
   await client.connect(transport);
   console.log(` ${C.green}Connected.${C.reset}\n`);
 
-  const verdictTarget: { session_id: string; timestamp: string } | null = null;
   let firstFlaggedSession: { session_id: string; timestamp: string } | null = null;
 
   // ── Run scenarios ──────────────────────────────────────────────────────────
@@ -351,7 +350,7 @@ async function main() {
       `\n ${C.dim}Each verdict becomes a labeled pair (annotation → confirmed/false alarm)${C.reset}`
     );
     console.log(
-      ` ${C.dim}that will train the Bayesian classification layer.${C.reset}`
+      ` ${C.dim}that updates the Bayesian classifier's posterior on the next check.${C.reset}`
     );
   }
 

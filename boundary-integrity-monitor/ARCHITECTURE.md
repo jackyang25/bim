@@ -1,13 +1,5 @@
 # Architecture Notes — Boundary Integrity Monitor
 
-## Current State (Prototype)
-
-The annotation layer calls a Claude model at temperature 0. The model is configurable via `ANNOTATION_MODEL` environment variable (default: `claude-haiku-4-5`). All tunable values — model, timeout, retries, input limits, routing thresholds — are externalised to environment variables via `config.ts`. No values are hardcoded.
-
-The annotation backend is abstracted behind a TypeScript interface (`AnnotatorBackend` in `annotator.ts`). The default implementation is `AnthropicAnnotator`. The wiring point is the top of `index.ts` — swapping backends is a one-line change.
-
----
-
 ## Pipeline
 
 ```
@@ -19,22 +11,74 @@ check_boundary_integrity (MCP tool)
         │
         ▼
   classifier.ts                ← ClassifierBackend interface
-  PassthroughClassifier        ← Bayesian slot (currently inactive)
+  BayesianClassifier           ← always active, pluggable PriorSource
         │
         ▼
-  router.ts                    ← deterministic boolean rules (prototype)
-                               ← probability threshold routing (Bayesian layer)
+  router.ts                    ← probability threshold routing
+                               ← routes by per-category risk scores vs τ thresholds
         │
         ▼
-  routing decision + annotations + flags_summary
+  routing decision + annotations + flags_summary + audit log
 ```
 
 The three swappable interfaces are:
 - `AnnotatorBackend` — what produces the structured annotation
-- `ClassifierBackend` — the slot between annotation and routing (inactive)
+- `ClassifierBackend` — Bayesian layer between annotation and routing
 - `VerdictStore` — where human review verdicts are persisted
 
-Everything downstream of the interfaces (routing rules, MCP schema, audit log, verdict feedback loop) is stable and does not change when backends change.
+The pluggable `PriorSource` controls what the classifier believes before any local data exists:
+- `UniformPrior` — Beta(1,1), zero knowledge (default)
+- `ConfigPrior` — loaded from a JSON file (domain expert knowledge)
+- `PooledPrior` — computed from a shared verdict pool (consortium deployments)
+
+Everything downstream of the interfaces (routing thresholds, MCP schema, audit log, verdict feedback loop) is stable and does not change when backends change.
+
+---
+
+## Bayesian Classification
+
+The `BayesianClassifier` is always active. It computes per-category P(confirmed_failure | flags active) using a Beta-Binomial conjugate model:
+
+1. **Prior** — supplied by the configured `PriorSource` (per-category α₀, β₀)
+2. **Update** — for each local verdict with a matching `failure_category`:
+   - `confirmed_failure` → α += 1
+   - `false_alarm` → β += 1
+   - `uncertain` → skipped
+3. **Posterior mean** — α / (α + β) = risk score for that category
+4. **Unflagged categories** — risk score is 0 (annotator didn't flag it)
+
+The prior gets washed out naturally as local verdicts accumulate. With a uniform prior Beta(1,1), ~50 verdicts are enough for local data to dominate. With an informative prior (e.g., from a consortium pool), new deployments get meaningful scores from the first request.
+
+The `submit_review_verdict` tool creates the feedback loop. Every human verdict stored in `verdicts.json` updates the posterior on the next classification call.
+
+---
+
+## Prior Sources
+
+### UniformPrior (default)
+Beta(1,1) per category. No opinion on whether flags are real failures or false alarms. Posterior mean starts at 0.5 for any flagged category. Conservative: everything flagged goes to `human_review` initially. Self-calibrates as verdicts accumulate.
+
+### ConfigPrior
+Loads per-category Beta parameters from a JSON file. Domain experts set these based on knowledge of their deployment context. Example: "scope violations are confirmed ~70% of the time" → `{"scope": {"alpha": 7, "beta": 3}}`. The prior's effective sample size is α + β, so {7, 3} means "this is worth about 10 observations of confidence." It takes ~10 real verdicts to have equal weight to this prior.
+
+### PooledPrior
+Computes priors from a shared `VerdictStore` containing verdicts aggregated across deployment sites. New sites in a consortium immediately inherit collective experience. As a site accumulates local verdicts, its posterior naturally diverges from the pool if its population differs.
+
+---
+
+## Routing
+
+The router compares per-category risk scores against calibrated thresholds:
+
+| Threshold | Default | Triggers |
+|---|---|---|
+| `T_ESCALATE_SAFETY` | 0.70 | `escalate_now` (escalation_integrity only — lower because missed escalations are clinically dangerous) |
+| `T_ESCALATE` | 0.85 | `escalate_now` (any other category) |
+| `T_REVIEW` | 0.40 | `human_review` |
+| `T_NOISE` | 0.10 | `log_only` |
+| below all | — | `pass` |
+
+Thresholds are configurable via environment variables and should be calibrated per deployment based on tolerance for false alarms vs. misses.
 
 ---
 
@@ -56,25 +100,13 @@ check_boundary_integrity
         ▼
 [ AnnotatorBackend interface ]
         │
-        ├──> AnthropicAnnotator (claude-haiku-4-5, default)
+        ├──> AnthropicAnnotator (claude-sonnet-4-20250514, default)
         ├──> OllamaAnnotator (local open model, no API cost)
         ├──> Any OpenAI-compatible endpoint
         └──> Future: fine-tuned boundary classifier
 ```
 
 Each backend implements the same contract. The routing layer never changes. The annotation schema never changes. The MCP interface never changes.
-
----
-
-## Bayesian Classification Slot
-
-The `ClassifierBackend` interface and `PassthroughClassifier` implementation sit between `annotator.ts` and `router.ts`. Currently the passthrough returns annotations unchanged, and the router uses deterministic boolean rules.
-
-When sufficient verdict data accumulates, a real Bayesian classifier slots in here. It takes annotations as input and produces per-category `risk_scores` — P(confirmed_failure) estimates for each of the four annotation categories. The router already has the probability threshold routing branch implemented and tested; it activates automatically when `risk_scores` is present in the classifier output.
-
-Routing thresholds (`T_ESCALATE_SAFETY`, `T_ESCALATE`, `T_REVIEW`, `T_NOISE`) are already externalised to environment variables and will be calibrated empirically from verdict data. `escalation_integrity` uses a lower `T_ESCALATE_SAFETY` threshold (0.70 vs 0.85) because the clinical consequence of a missed escalation is higher than a scope violation.
-
-The `submit_review_verdict` tool creates the feedback loop. Every human verdict (`confirmed_failure` / `false_alarm` / `uncertain`) stored in `verdicts.json` is future training signal. The Bayesian layer doesn't need large amounts of data to outperform the deterministic rules — it just needs some.
 
 ---
 
@@ -90,9 +122,9 @@ Two implications:
 
 1. **The annotation schema is not enough.** A reference annotation model — or at minimum a reference prompt and evaluation set — needs to be distributed alongside the schema, so sites can assess how their local backend compares.
 
-2. **Backend diversity is a data quality problem, not just a deployment problem.** The consortium structure needs a position on this before the Bayesian layer goes live. Options range from requiring a canonical backend (limits accessibility) to learning per-site calibration offsets (technically complex) to treating site as a covariate in the model (principled but requires sufficient data per site).
+2. **Backend diversity is a data quality problem, not just a deployment problem.** The consortium structure needs a position on this before pooled data is used for inference. Options range from requiring a canonical backend (limits accessibility) to learning per-site calibration offsets (technically complex) to treating site as a covariate in the model (principled but requires sufficient data per site).
 
-Neither implication blocks the prototype. Both need to be resolved before pooled data is used for inference.
+Neither implication blocks the current implementation. Both need to be resolved before pooled data is used for cross-site inference.
 
 ---
 
@@ -138,11 +170,12 @@ This log is append-only and separate from the verdict store. It records every ch
 The abstraction question affects only `annotator.ts`. Everything downstream is stable:
 
 - The annotation schema (`Annotations` type) — stable
-- The routing rules (`router.ts`) — stable
+- The routing thresholds (`router.ts`) — stable
 - The verdict store (`verdict-store.ts`) — stable
 - The MCP interface (`index.ts`) — stable
-- The Bayesian classification slot (`classifier.ts`) — stable
+- The Bayesian classification layer (`classifier.ts`) — stable
+- The prior source interface (`prior.ts`) — stable
 - The audit log (`audit-log.ts`) — stable
 - The `schema_version` on all outputs — stable
 
-The monitor's value is in the schema, the routing logic, and the feedback loop. The annotation backend is infrastructure. It should be treated as such.
+The monitor's value is in the schema, the Bayesian feedback loop, and the routing logic. The annotation backend is infrastructure. It should be treated as such.

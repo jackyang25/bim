@@ -17,9 +17,9 @@ import { dirname, join } from "path";
 import { fileURLToPath } from "url";
 import { AnthropicAnnotator } from "./annotator.js";
 import type { AnnotatorBackend } from "./annotator.js";
-import { PassthroughClassifier } from "./classifier.js";
+import type { ClassifierBackend } from "./classifier.js";
 import { route } from "./router.js";
-import type { BoundarySpec, HistoryExchange, RoutingDecision } from "./types.js";
+import type { Annotations, BoundarySpec, ClassifierOutput, HistoryExchange, RoutingDecision } from "./types.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -69,7 +69,12 @@ async function main() {
   const refSet = JSON.parse(readFileSync(refPath, "utf-8")) as ReferenceSet;
 
   const annotator: AnnotatorBackend = new AnthropicAnnotator();
-  const classifier = new PassthroughClassifier();
+  // Eval tests the annotator + boolean rules path (no risk_scores).
+  const classifier: ClassifierBackend = {
+    async classify(annotations: Annotations): Promise<ClassifierOutput> {
+      return { annotations };
+    },
+  };
 
   console.log("\n" + "═".repeat(64));
   console.log(` ${C.bold}Boundary Integrity Monitor — Reference Evaluation${C.reset}`);

@@ -3,8 +3,10 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { z } from "zod";
 import { AnthropicAnnotator } from "./annotator.js";
 import type { AnnotatorBackend } from "./annotator.js";
-import { PassthroughClassifier } from "./classifier.js";
+import { BayesianClassifier } from "./classifier.js";
 import type { ClassifierBackend } from "./classifier.js";
+import { UniformPrior, ConfigPrior, PooledPrior } from "./prior.js";
+import type { PriorSource } from "./prior.js";
 import { route } from "./router.js";
 import { LocalJsonVerdictStore } from "./verdict-store.js";
 import type { VerdictStore } from "./verdict-store.js";
@@ -18,12 +20,31 @@ import type {
   SubmitReviewVerdictInput,
 } from "./types.js";
 
+// ─── Prior source factory ────────────────────────────────────────────────────
+
+function createPriorSource(store: VerdictStore): PriorSource {
+  switch (config.prior.source) {
+    case "config":
+      if (!config.prior.configPath) {
+        logger.warn("prior_config_path_missing", { fallback: "UniformPrior" });
+        return new UniformPrior();
+      }
+      return new ConfigPrior(config.prior.configPath);
+    case "pooled":
+      return new PooledPrior(store);
+    case "uniform":
+    default:
+      return new UniformPrior();
+  }
+}
+
 // ─── Wiring point ─────────────────────────────────────────────────────────────
 // Swap implementations here to change backends.
 
 const annotator: AnnotatorBackend = new AnthropicAnnotator();
-const classifier: ClassifierBackend = new PassthroughClassifier();
 const store: VerdictStore = new LocalJsonVerdictStore();
+const priorSource: PriorSource = createPriorSource(store);
+const classifier: ClassifierBackend = new BayesianClassifier(store, priorSource);
 const auditLog = new AuditLog(config.storage.auditLogPath);
 const SERVER_START = Date.now();
 
@@ -311,6 +332,59 @@ server.tool(
   }
 );
 
+// ─── Tool: get_classifier_state ───────────────────────────────────────────────
+
+server.tool(
+  "get_classifier_state",
+  "Returns the current Bayesian classifier state: per-category priors, local verdict counts, posterior estimates, active routing thresholds, and effective sample sizes. Read-only — use this to understand how the system is currently scoring each category.",
+  {},
+  async () => {
+    const state = (classifier as BayesianClassifier).getState();
+
+    const output = {
+      ...state,
+      routing_thresholds: {
+        escalate_now_safety: config.routing.tEscalateSafety,
+        escalate_now: config.routing.tEscalate,
+        human_review: config.routing.tReview,
+        log_only: config.routing.tNoise,
+      },
+      interpretation: Object.fromEntries(
+        (["scope", "escalation", "input_boundary", "interaction_pattern"] as const).map((cat) => {
+          const c = state.categories[cat];
+          const mean = c.posterior.mean;
+          let routing: string;
+          if (cat === "escalation" && mean >= config.routing.tEscalateSafety) {
+            routing = "escalate_now";
+          } else if (mean >= config.routing.tEscalate) {
+            routing = "escalate_now";
+          } else if (mean >= config.routing.tReview) {
+            routing = "human_review";
+          } else if (mean >= config.routing.tNoise) {
+            routing = "log_only";
+          } else {
+            routing = "pass";
+          }
+          return [cat, {
+            posterior_mean: Math.round(mean * 1000) / 1000,
+            would_route_to: routing,
+            data_strength: c.effective_sample_size <= 2 ? "prior only"
+              : c.effective_sample_size <= 12 ? "weak (prior-dominated)"
+              : c.effective_sample_size <= 50 ? "moderate"
+              : "strong (data-dominated)",
+          }];
+        })
+      ),
+    };
+
+    logger.info("classifier_state_requested");
+
+    return {
+      content: [{ type: "text", text: JSON.stringify(output, null, 2) }],
+    };
+  }
+);
+
 // ─── Tool: health_check ───────────────────────────────────────────────────────
 
 server.tool(
@@ -328,7 +402,7 @@ server.tool(
       schema_version: config.server.schemaVersion,
       uptime_seconds: Math.floor((Date.now() - SERVER_START) / 1000),
       annotation_backend: (annotator as AnthropicAnnotator).backendName ?? "AnthropicAnnotator",
-      classifier_backend: "PassthroughClassifier (Bayesian slot: inactive)",
+      classifier_backend: (classifier as BayesianClassifier).backendName,
       verdict_store: (store as LocalJsonVerdictStore).storeName ?? "LocalJsonVerdictStore",
       model: config.annotation.model,
       annotation_timeout_ms: config.annotation.timeoutMs,

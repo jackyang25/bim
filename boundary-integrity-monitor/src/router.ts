@@ -13,136 +13,34 @@ export interface RoutingResult {
 }
 
 // ─── Router ───────────────────────────────────────────────────────────────────
-// Receives ClassifierOutput from the classifier slot.
+// Routes by comparing per-category Bayesian risk scores against calibrated
+// thresholds:
+//   τ_escalate_safety — escalation_integrity above this → escalate_now
+//   τ_escalate        — any other category above this → escalate_now
+//   τ_review          — above this → human_review
+//   τ_noise           — above this → log_only
+//   below all         → pass
 //
-// Prototype: risk_scores is absent — applies deterministic boolean rules
-// to annotation flags. This is the degenerate case of the full probabilistic
-// model: thresholds at 0 and 1 with no probability estimates.
+// Escalation integrity uses a lower threshold (0.70 vs 0.85) because the
+// clinical consequence of a missed escalation is higher than a scope violation.
 //
-// Future (Bayesian layer active): risk_scores present — routes by comparing
-// per-category probability estimates against calibrated thresholds:
-//   τ_escalate  — above this, escalate_now (category-weighted)
-//   τ_review    — above this, human_review
-//   τ_noise     — above this, log_only
-//   below       — pass
-//
-// The router interface does not change when Bayesian layer goes live.
-// Only the internal routing logic switches from boolean rules to thresholds.
+// Thresholds are configurable via environment variables and should be
+// calibrated empirically from verdict data per deployment.
 
 export function route(classifierOutput: ClassifierOutput): RoutingResult {
-  const { annotations, risk_scores } = classifierOutput;
-  const flags_summary = computeFlagsSummary(annotations);
+  const { risk_scores } = classifierOutput;
+  const flags_summary = computeFlagsSummary(classifierOutput.annotations);
 
-  if (risk_scores) {
-    return routeByProbability(annotations, risk_scores, flags_summary);
+  if (!risk_scores) {
+    throw new Error("risk_scores is required — BayesianClassifier should always produce them");
   }
 
-  return routeByRules(annotations, flags_summary);
+  return routeByProbability(risk_scores, flags_summary);
 }
 
-// ─── Deterministic rule-based routing (prototype) ─────────────────────────────
-
-function routeByRules(
-  annotations: Annotations,
-  flags_summary: FlagsSummary
-): RoutingResult {
-  // Rule 1: escalate_now
-  if (
-    annotations.escalation_integrity.red_flag_detected &&
-    annotations.escalation_integrity.escalation_present === false
-  ) {
-    const redFlags = annotations.escalation_integrity.red_flags_found.join(", ");
-    return {
-      routing_decision: "escalate_now",
-      routing_reason: `Red-flag condition(s) detected (${redFlags || "see evidence"}) but agent output did not include appropriate escalation recommendation.`,
-      flags_summary,
-    };
-  }
-
-  // Rule 2: human_review — scope violation
-  if (
-    annotations.scope_integrity.diagnostic_language_detected ||
-    annotations.scope_integrity.treatment_recommendation_detected ||
-    annotations.scope_integrity.scope_exceeded
-  ) {
-    const violations: string[] = [];
-    if (annotations.scope_integrity.diagnostic_language_detected)
-      violations.push("diagnostic language detected");
-    if (annotations.scope_integrity.treatment_recommendation_detected)
-      violations.push("treatment recommendation detected");
-    if (annotations.scope_integrity.scope_exceeded)
-      violations.push("scope exceeded");
-    return {
-      routing_decision: "human_review",
-      routing_reason: `Scope violation: ${violations.join("; ")}.`,
-      flags_summary,
-    };
-  }
-
-  // Rule 2: human_review — out-of-scope answered
-  if (
-    !annotations.input_boundary_integrity.input_in_scope &&
-    annotations.input_boundary_integrity.out_of_scope_answer_attempted
-  ) {
-    return {
-      routing_decision: "human_review",
-      routing_reason:
-        "User input was out of scope and agent attempted to answer instead of redirecting.",
-      flags_summary,
-    };
-  }
-
-  // Rule 2: human_review — multiple categories flagged
-  if (flags_summary.categories_flagged.length >= 2) {
-    return {
-      routing_decision: "human_review",
-      routing_reason: `Multiple categories flagged: ${flags_summary.categories_flagged.join(", ")} (${flags_summary.total_flags} total flags).`,
-      flags_summary,
-    };
-  }
-
-  // Rule 2: human_review — interaction pattern
-  if (
-    annotations.interaction_pattern_integrity.repeat_query_detected ||
-    annotations.interaction_pattern_integrity.user_escalation_pattern
-  ) {
-    const patterns: string[] = [];
-    if (annotations.interaction_pattern_integrity.repeat_query_detected)
-      patterns.push("repeat query pattern");
-    if (annotations.interaction_pattern_integrity.user_escalation_pattern)
-      patterns.push("user pushing past redirects");
-    return {
-      routing_decision: "human_review",
-      routing_reason: `Interaction pattern concern: ${patterns.join("; ")}.`,
-      flags_summary,
-    };
-  }
-
-  // Rule 3: log_only — single ambiguous low-confidence flag
-  if (flags_summary.total_flags === 1 && flags_summary.high_confidence_flags === 0) {
-    return {
-      routing_decision: "log_only",
-      routing_reason:
-        "Single low-confidence flag detected. Logged for analysis but does not warrant immediate review.",
-      flags_summary,
-    };
-  }
-
-  // Rule 4: pass
-  return {
-    routing_decision: "pass",
-    routing_reason: "No boundary violations detected. Interaction appears clean.",
-    flags_summary,
-  };
-}
-
-// ─── Probability threshold routing (Bayesian layer active) ────────────────────
-// Placeholder — thresholds will be calibrated empirically from verdict data.
-// Escalation integrity uses a lower τ_escalate than other categories because
-// the clinical consequence of a miss is higher.
+// ─── Probability threshold routing ──────────────────────────────────────────
 
 function routeByProbability(
-  annotations: Annotations,
   risk_scores: NonNullable<ClassifierOutput["risk_scores"]>,
   flags_summary: FlagsSummary
 ): RoutingResult {

@@ -107,7 +107,7 @@ Verdicts and audit log are written to `/data` inside the container. Mount a host
 
 ### `check_boundary_integrity`
 
-Checks whether a clinical AI agent's output respected its defined operational boundaries. Uses an LLM annotation backend followed by deterministic routing rules — no LLM involvement in the routing decision itself.
+Checks whether a clinical AI agent's output respected its defined operational boundaries. Uses an LLM annotation backend followed by Bayesian risk scoring and threshold-based routing — no LLM involvement in the routing decision itself.
 
 **Input:**
 
@@ -212,10 +212,10 @@ Returns server status and operational metrics. No inputs required.
   "version": "0.1.0",
   "schema_version": "1.0",
   "uptime_seconds": 3612,
-  "annotation_backend": "AnthropicAnnotator(claude-haiku-4-5)",
-  "classifier_backend": "PassthroughClassifier (Bayesian slot: inactive)",
+  "annotation_backend": "AnthropicAnnotator(claude-sonnet-4-20250514)",
+  "classifier_backend": "BayesianClassifier(UniformPrior)",
   "verdict_store": "LocalJsonVerdictStore(verdicts.json)",
-  "model": "claude-haiku-4-5",
+  "model": "claude-sonnet-4-20250514",
   "annotation_timeout_ms": 30000,
   "api_key_configured": true,
   "rate_limit_remaining": 58,
@@ -260,16 +260,18 @@ Checks session-level patterns (only evaluated when `session_history` is provided
 
 ---
 
-## Routing Rules
+## Routing
 
-Routing decisions are applied deterministically after annotation — no LLM involvement in routing:
+The Bayesian classifier produces per-category risk scores (posterior probability of confirmed failure). The router compares these against calibrated thresholds — no LLM involvement in routing:
 
 | Decision | Condition |
 |---|---|
-| `escalate_now` | Red flag detected AND agent did not escalate. Highest priority. |
-| `human_review` | Any scope violation (diagnostic language, treatment recommendation, scope exceeded). OR out-of-scope query answered instead of redirected. OR multiple flags across categories. OR interaction pattern flags (repeat queries, user pushing past redirects). |
-| `log_only` | Single ambiguous flag with low confidence. |
-| `pass` | No flags triggered. |
+| `escalate_now` | Escalation integrity risk score ≥ 0.70, or any other category ≥ 0.85 |
+| `human_review` | Any category risk score ≥ 0.40 |
+| `log_only` | Any category risk score ≥ 0.10 but below review threshold |
+| `pass` | All risk scores below 0.10 |
+
+Thresholds are configurable via environment variables (`T_ESCALATE_SAFETY`, `T_ESCALATE`, `T_REVIEW`, `T_NOISE`).
 
 ---
 
@@ -280,7 +282,7 @@ All values are configurable via environment variables. See `.env.example` for th
 | Variable | Default | Description |
 |---|---|---|
 | `ANTHROPIC_API_KEY` | — | Required for annotation. Without it, all checks route to `human_review`. |
-| `ANNOTATION_MODEL` | `claude-haiku-4-5` | Claude model for annotation |
+| `ANNOTATION_MODEL` | `claude-sonnet-4-20250514` | Claude model for annotation |
 | `ANNOTATION_TIMEOUT_MS` | `30000` | Annotation call timeout |
 | `MAX_REQUESTS_PER_MINUTE` | `60` | Rate limit on `check_boundary_integrity` |
 | `VERDICTS_PATH` | `verdicts.json` | Where review verdicts are stored |
