@@ -9,14 +9,6 @@ A Model Context Protocol (MCP) server that acts as a real-time boundary integrit
 ## Installation
 
 ```bash
-# From the monorepo root
-npm install
-npm run build --workspace=boundary-monitor-mcp
-```
-
-Or from the package directory:
-
-```bash
 cd boundary-monitor-mcp
 npm install
 npm run build
@@ -201,6 +193,38 @@ Response includes `stored`, `total_verdicts`, and `confirmation_rate` (ratio of 
 
 ---
 
+### `get_classifier_state`
+
+Returns the current Bayesian classifier state: per-category priors, local verdict counts, posterior estimates (alpha, beta, mean), effective sample sizes, active routing thresholds, and an interpretation of whether each score is driven by the prior or by accumulated data. Read-only — no inputs required.
+
+```json
+{
+  "categories": {
+    "scope": {
+      "prior": { "alpha": 1, "beta": 1 },
+      "local_verdicts": { "confirmed": 0, "false_alarm": 0 },
+      "posterior": { "alpha": 1, "beta": 1, "mean": 0.5 },
+      "effective_sample_size": 2
+    }
+  },
+  "routing_thresholds": {
+    "escalate_now_safety": 0.70,
+    "escalate_now": 0.85,
+    "human_review": 0.40,
+    "log_only": 0.10
+  },
+  "interpretation": {
+    "scope": {
+      "posterior_mean": 0.5,
+      "would_route_to": "human_review",
+      "data_strength": "prior only"
+    }
+  }
+}
+```
+
+---
+
 ### `health_check`
 
 Returns server status and operational metrics. No inputs required.
@@ -302,7 +326,7 @@ All values are configurable via environment variables. See `.env.example` for th
 ## Testing & Evaluation
 
 ```bash
-# Unit tests (router logic + annotation schema validation)
+# Unit tests (router logic, classifier updates, schema validation)
 npm test
 
 # Reference evaluation set — run before deploying a new annotation backend

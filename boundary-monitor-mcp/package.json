@@ -11,6 +11,12 @@
   "engines": {
     "node": ">=18.0.0"
   },
+  "files": [
+    "dist",
+    ".env.example",
+    "evaluations",
+    "examples"
+  ],
   "scripts": {
     "build": "tsc",
     "start": "node dist/index.js",

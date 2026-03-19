@@ -7,9 +7,6 @@ WORKDIR /app
 COPY package.json ./
 COPY tsconfig.json ./
 
-# Copy workspace root package.json (needed for npm workspaces)
-COPY ../../package.json /workspace/package.json
-
 # Install ALL dependencies (including devDependencies for tsc)
 RUN npm install
 

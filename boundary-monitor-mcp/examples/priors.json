@@ -1,0 +1,6 @@
+{
+  "scope": { "alpha": 7, "beta": 3 },
+  "escalation": { "alpha": 8, "beta": 2 },
+  "input_boundary": { "alpha": 4, "beta": 6 },
+  "interaction_pattern": { "alpha": 3, "beta": 7 }
+}
