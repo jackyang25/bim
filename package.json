@@ -5,6 +5,7 @@
   "license": "MIT",
   "private": true,
   "workspaces": [
-    "boundary-monitor-mcp"
+    "boundary-monitor-mcp",
+    "dashboard"
   ]
 }

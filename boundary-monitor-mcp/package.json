@@ -4,6 +4,11 @@
   "description": "MCP server for real-time boundary integrity monitoring of clinical AI agents",
   "type": "module",
   "main": "dist/index.js",
+  "exports": {
+    ".": "./dist/index.js",
+    "./types": "./dist/types.js",
+    "./audit-log": "./dist/audit-log.js"
+  },
   "bin": {
     "boundary-monitor-mcp": "./dist/index.js"
   },

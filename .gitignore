@@ -3,7 +3,11 @@ node_modules/
 
 # Build output
 dist/
+dist-server/
 *.tsbuildinfo
+
+# Dashboard runtime data
+review-queue.json
 
 # Runtime data (mount as volumes in production)
 verdicts.json
