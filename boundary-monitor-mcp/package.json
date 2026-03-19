@@ -1,11 +1,11 @@
 {
-  "name": "boundary-integrity-monitor",
+  "name": "boundary-monitor-mcp",
   "version": "0.1.0",
   "description": "MCP server for real-time boundary integrity monitoring of clinical AI agents",
   "type": "module",
   "main": "dist/index.js",
   "bin": {
-    "boundary-integrity-monitor": "./dist/index.js"
+    "boundary-monitor-mcp": "./dist/index.js"
   },
   "license": "MIT",
   "engines": {

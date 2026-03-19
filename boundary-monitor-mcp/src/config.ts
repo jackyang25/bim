@@ -25,7 +25,7 @@ function str(key: string, fallback: string): string {
 
 export const config = {
   server: {
-    name: "boundary-integrity-monitor",
+    name: "boundary-monitor-mcp",
     version: "0.1.0",
     schemaVersion: "1.0",           // Bump when annotation schema changes
   },

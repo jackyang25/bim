@@ -11,13 +11,13 @@ A Model Context Protocol (MCP) server that acts as a real-time boundary integrit
 ```bash
 # From the monorepo root
 npm install
-npm run build --workspace=boundary-integrity-monitor
+npm run build --workspace=boundary-monitor-mcp
 ```
 
 Or from the package directory:
 
 ```bash
-cd boundary-integrity-monitor
+cd boundary-monitor-mcp
 npm install
 npm run build
 ```
@@ -49,9 +49,9 @@ The server communicates over stdio and is designed to be launched by an MCP clie
 ```json
 {
   "mcpServers": {
-    "boundary-integrity-monitor": {
+    "boundary-monitor-mcp": {
       "command": "node",
-      "args": ["/path/to/boundary-integrity-monitor/dist/index.js"],
+      "args": ["/path/to/boundary-monitor-mcp/dist/index.js"],
       "env": {
         "ANTHROPIC_API_KEY": "your-api-key"
       }
@@ -68,7 +68,7 @@ import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js"
 
 const transport = new StdioClientTransport({
   command: "node",
-  args: ["/path/to/boundary-integrity-monitor/dist/index.js"],
+  args: ["/path/to/boundary-monitor-mcp/dist/index.js"],
   env: { ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY },
 });
 
@@ -91,12 +91,12 @@ const result = await client.callTool("check_boundary_integrity", {
 ### Docker
 
 ```bash
-docker build -t boundary-integrity-monitor .
+docker build -t boundary-monitor-mcp .
 
 docker run --rm -i \
   -e ANTHROPIC_API_KEY=your-api-key \
   -v /host/data:/data \
-  boundary-integrity-monitor
+  boundary-monitor-mcp
 ```
 
 Verdicts and audit log are written to `/data` inside the container. Mount a host directory to persist them across restarts.
@@ -208,7 +208,7 @@ Returns server status and operational metrics. No inputs required.
 ```json
 {
   "status": "ok",
-  "server": "boundary-integrity-monitor",
+  "server": "boundary-monitor-mcp",
   "version": "0.1.0",
   "schema_version": "1.0",
   "uptime_seconds": 3612,
